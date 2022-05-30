@@ -7,24 +7,27 @@
 // 鉴定为纯纯的奥里给
 
 int main(int argc, char *argv[]) {
-	int infd;
-	int outfd;
+	FILE *infile;
+	FILE *outfile;
 	
 	if (argc < 2) {
 		exit(EXIT_FAILURE);
 	}
 
-	infd = open(argv[1],O_RDONLY);
-	if (infd == -1) {
+	infile = fopen(argv[1],"r");
+	if (infile == NULL) {
 		exit(EXIT_FAILURE);
 	}
-	outfd = open(argv[2],O_WRONLY);
-	if (outfd == -1) {
+	outfile = fopen(argv[2],"w+");
+	if (outfile == NULL) {
 		exit(EXIT_FAILURE);
 	}
 
 	off_t filesize;
-	filesize = lseek(infd,0,SEEK_END);
+	if (fseek(infile,0,SEEK_END) == -1) {
+		exit(EXIT_FAILURE);
+	}
+	filesize = ftell(infile);
 	if (filesize == -1) {
 		exit(EXIT_FAILURE);
 	}
@@ -35,9 +38,15 @@ int main(int argc, char *argv[]) {
 	unsigned char c;
 
 	while (1) {
-		pread(infd,&c,1,inseek);
+		if (fseek(infile,inseek,SEEK_SET) == -1) {
+			break;
+		}
+		fread(&c,1,1,infile);
 
-		if (pwrite(outfd,&c,1,outseek) != 1) {
+		if (fseek(outfile,outseek,SEEK_SET) == -1) {
+			break;
+		}
+		if (fwrite(&c,1,1,outfile) != 1) {
 			break;
 		}
 
@@ -48,7 +57,7 @@ int main(int argc, char *argv[]) {
 		--inseek;
 	}
 
-	close(infd);
-	close(outfd);
+	fclose(infile);
+	fclose(outfile);
 	exit(EXIT_SUCCESS);
 }

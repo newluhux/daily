@@ -1,0 +1,25 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+inserfile("file",1,{1,2,3},3)
+
+file:
+
+FF AA FF AA FF
+
+12 3F FA AF FA AF F
+
+

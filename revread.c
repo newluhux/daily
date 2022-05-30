@@ -4,6 +4,7 @@
 #include <fcntl.h>
 
 // 反着写入
+// 硬盘不会反着转
 // 鉴定为纯纯的奥里给
 
 int main(int argc, char *argv[]) {

@@ -527,6 +527,63 @@ int file_t_dump(struct file_t *ft,FILE *new) {
 	return 1;
 }
 
+
+// 有BUG
+/*
+ 往当前行的前/后面插入内容
+ 内容从in中读取
+ 如果where == -1 在前一行插入
+ 如果where == 1 在行后插入
+ 如果成功返回1
+ 如果失败返回-1
+*/
+int add_lines(struct file_t *ft,FILE *in,int where) {
+	if (ft == NULL || in == NULL) {
+		return -1;
+	}
+	if (!(where == -1 || where == 1)) {
+		return -1;
+	}
+	char end[] = { '.', '\n', '\0' };
+	char *line = NULL;
+	size_t linelen = 0;
+	while (getline(&line,&linelen,in) != -1) {
+		if (strncmp(line,end,2) == 0) {
+			break;
+		}
+		if (ft->lines != 0) {
+			if (line_t_insert_new(ft->cur,where) == -1) {
+				goto err;
+			}
+			if (where == 1) {
+				ft->cur = ft->cur->next;
+			} else if (where == -1) {
+				ft->cur = ft->cur->prev;
+			}
+		}
+
+		ft->cur->line = strdup(line);
+		ft->cur->len = linelen;
+		if (ft->end->next != NULL) {
+			ft->end = line_t_get_tail(ft->end);
+		}
+		if (ft->start->prev != NULL) {
+			ft->start = line_t_get_head(ft->start);
+		}
+		ft->lines++;
+	}
+	ft->cur_pos = line_t_pos(ft->cur);
+	if (line != NULL) {
+		free(line);
+	}
+	return 1;
+err:
+	if (line != NULL) {
+		free(line);
+	}
+	return -1;
+}
+
 /*
  打印指定的行
  如果 line_num == 0 则打印ft->cur->line
@@ -663,9 +720,10 @@ int commands(FILE *in,struct file_t *ft) {
 	while (getline(&cmd,&cmdlen,in) != -1) {
 		if (*cmd == 'q') {
 			return 0;
-		} if (*cmd == 'w') {
+		} else if (*cmd == 'w') {
 			if (file_t_dump(ft,NULL) == -1) {
-				fprintf(stderr,"Can't write to file\n");
+				fprintf(stderr,"Can't write to file ");
+				perror("");
 			}
 		} else if (*cmd == 'p') {
 			if (display_line(ft,0) == -1) {
@@ -679,7 +737,15 @@ int commands(FILE *in,struct file_t *ft) {
 			if (move_linep(ft,ft->cur_pos+1) == -1) {
 				fprintf(stderr,"Can't move line pointer\n");
 			}
-		} else {
+		} else if (*cmd == 'a') {
+			if (add_lines(ft,in,1) == -1) {
+				fprintf(stderr,"Can't add line\n");
+			}
+		} else if (*cmd == 'i') {
+			if (add_lines(ft,in,-1) == -1) {
+				fprintf(stderr,"Can't add line\n");
+			}
+		} else { // 核心代码 !!!
 			putchar('?');
 			putchar('\n');
 		}

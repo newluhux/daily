@@ -200,7 +200,6 @@ uint64_t line_t_pos(struct line_t *lt) {
 	uint64_t pos = 1;
 	cur = lt;
 	while (cur->prev != NULL) {
-		cur = cur->prev;
 		pos++;
 	}
 	return pos;
@@ -501,9 +500,6 @@ int file_t_dump(struct file_t *ft,FILE *new) {
 	struct line_t *cur = NULL;
 	uint64_t i;
 	cur = ft->start;
-	if (ftruncate(fileno(fw),0) == -1) {
-		return -1;
-	}
 	for (i=1;i<=(ft->lines);i++) {
 		if (cur == NULL) {
 			return -1;
@@ -522,7 +518,6 @@ int file_t_dump(struct file_t *ft,FILE *new) {
 		}
 		cur = cur->next;
 	}
-
 	fflush(fw);
 	return 1;
 }
@@ -663,10 +658,6 @@ int commands(FILE *in,struct file_t *ft) {
 	while (getline(&cmd,&cmdlen,in) != -1) {
 		if (*cmd == 'q') {
 			return 0;
-		} if (*cmd == 'w') {
-			if (file_t_dump(ft,NULL) == -1) {
-				fprintf(stderr,"Can't write to file\n");
-			}
 		} else if (*cmd == 'p') {
 			if (display_line(ft,0) == -1) {
 				fprintf(stderr,"Can't print line\n");
@@ -679,9 +670,6 @@ int commands(FILE *in,struct file_t *ft) {
 			if (move_linep(ft,ft->cur_pos+1) == -1) {
 				fprintf(stderr,"Can't move line pointer\n");
 			}
-		} else {
-			putchar('?');
-			putchar('\n');
 		}
 	}
 }

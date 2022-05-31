@@ -22,5 +22,22 @@ FF AA FF AA FF
 
 12 3F FA AF FA AF F
 
+addr = 4
+prev = 0
+next = 5
 
+addr = 5
+prev = 4
+next = 1
 
+addr = 1
+prev = 5
+next = 2
+
+addr = 2
+prev = 1
+next = 3
+
+addr = 3
+prev = 2
+next = 0

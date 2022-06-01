@@ -5,790 +5,290 @@
 #include <stdint.h>
 #include <assert.h>
 
-// 使用链表存储文件内容
 struct line_t {
-	void *line;          // 当前行的内容
-	uint64_t len;        // 当前行长度
-	struct line_t *next; // 下一行
-	struct line_t *prev; // 上一行
+	off_t offset;
+	struct line_t *prev;
+	struct line_t *next;
 };
 
 /*
- 创建并初始化新的 line_t 节点
- 新的节点使用 malloc 分配
- 如果成功返回新的节点
+ 创建 line_t 结构
+ 如果成功返回 malloc 申请的内存空间地址
  如果失败返回 NULL
 */
-struct line_t *line_t_new(void) {
-	struct line_t *new;
-	new = (struct line_t *)malloc(sizeof(*new));
-	if (new == NULL) {
-		return NULL;
-	}
-	new->next = NULL;
-	new->prev = NULL;
-	new->line = NULL;
-	new->len = 0;
-	return new;
-}
+struct line_t *line_t_init(off_t offset);
 
 /*
- 从链上删除此节点，并释放此节点的内存占用
- 如果成功返回1
- 如果失败返回-1
-*/
-int line_t_free(struct line_t *lt) {
-	if (lt == NULL) {
-		return -1;
-	}
-
-	// 把断开的链接起来
-	if (lt->next != NULL) {
-		lt->next->prev = lt->prev;
-	}
-	if (lt->prev != NULL) {
-		lt->prev->next = lt->next;
-	}
-
-	if (lt->line != NULL) {
-		free(lt->line);
-	}
-	free(lt);
-	return 1;
-}
-
-
-/*
- 向 lt 节点的prev或者next插入新的节点
- 当 where 为 1 的时候在节点的next插入新节点
- 当 where 为 -1 的时候在节点的prev插入新节点
+ 在链上添加 line_t 节点
+ 如果where == 1 ，在next添加
+ 如果where == -1 ，在prev添加
  如果成功返回 1
  如果失败返回 -1
 */
-int line_t_insert_new(struct line_t *lt,int where) {
-	struct line_t *new = NULL;
-	new = line_t_new();
-	if (new == NULL) {
-		goto err;
+int line_t_insert(struct line_t *lt,int where,off_t offset);
+
+/*
+ 在链上删除指定的 line_t 节点
+ 如果成功返回 1
+ 如果失败返回 -1
+*/
+int line_t_free(struct line_t *lt);
+
+/*
+ 删除整条链
+ 如果成功返回 1
+ 如果失败返回 -1
+*/
+int line_t_freeall(struct line_t *lt);
+
+/*
+ 返回链的长度
+ 如果成功返回长度
+ 如果失败返回0
+*/
+unsigned long line_t_length(struct line_t *lt);
+/*
+ 返回当前 line_t 节点在链中的位置 （从1开始计数）
+ 如果成功返回位置
+ 如果失败返回0
+*/
+unsigned long line_t_position(struct line_t *lt);
+
+/*
+ 返回链中第position个节点的指针 （从1开始计数）
+ 如果成功则返回指针
+ 如果失败则返回 NULL
+*/
+struct line_t *line_t_get(struct line_t *lt,unsigned long position);
+
+int test_line_t(void) {
+
+	// 初始化随机数生成器
+	FILE *randsrcfp = NULL;
+	char *randsrcfn = "/dev/random";
+	randsrcfp = fopen(randsrcfn,"r");
+	if (randsrcfp == NULL) {
+		assert(0);
 	}
-	if (where == 1) { // after
+
+    struct line_t *line_t_node = NULL;
+	line_t_node = line_t_init(1);
+	if (line_t_node == NULL) {
+		assert(0);
+	}
+	if (line_t_node->prev != NULL || line_t_node->next != NULL) {
+		assert(0);
+	}
+
+    unsigned long chain_len = 0;
+	chain_len = line_t_length(line_t_node);
+	if (chain_len != 1) {
+		assert(0);
+	}
+
+	struct line_t *line_t_temp = NULL;
+	line_t_temp = line_t_get(line_t_node,1);
+	if (line_t_temp != line_t_node) {
+		assert(0);
+	}
+	line_t_temp = line_t_get(line_t_temp,50);
+	if (line_t_temp != NULL) {
+		assert(0);
+	}
+
+	unsigned long i = 0;
+	uint16_t randu16;
+
+	if (fread(&randu16,sizeof(randu16),1,randsrcfp) != 1) {
+		assert(0);
+	}
+	unsigned long opcounter = 0;
+	chain_len += randu16;
+	line_t_temp = line_t_node;
+	for (i=1;i<=chain_len;i++) {
+
+		if (line_t_insert(line_t_temp,1,i) == -1) {
+			assert(0);
+		}
+		if (line_t_temp->next->prev != line_t_temp) {
+			assert(0);
+		}
+
+		line_t_temp = line_t_temp->next;
+	}
+
+	unsigned long chain_len_computed = 0;
+	chain_len_computed = line_t_length(line_t_node);
+
+	if (i != chain_len_computed) {
+		assert(0);
+	}
+
+	if (line_t_node->prev != NULL) {
+		assert(0);
+	}
+
+	line_t_temp = line_t_node;
+	while (line_t_temp->next != NULL) {
+		if (line_t_free(line_t_temp->next) == -1) {
+			assert(0);
+		}
+		opcounter++;
+	}
+
+	line_t_temp = line_t_node;
+
+	if (opcounter != chain_len_computed-1) {
+		assert(0);
+	}
+
+	if (line_t_node->next != NULL || line_t_node->prev != NULL) {
+		assert(0);
+	}
+
+	if (line_t_free(line_t_node) != 1) {
+		assert(0);
+	}
+	return 0;
+}
+
+struct line_t *line_t_init(off_t offset) {
+	struct line_t *new = NULL;
+	new = (struct line_t *)malloc(sizeof(*new));
+	if (new == NULL) {
+		return new;
+	}
+	new->prev = NULL;
+	new->next = NULL;
+	new->offset = 0;
+	return new;
+}
+
+int line_t_insert(struct line_t *lt,int where,off_t offset) {
+	struct line_t *new = NULL;
+	if (lt == NULL) {
+		return -1;
+	}
+	if (where != 1 && where != -1) {
+		return -1;
+	}
+	new = line_t_init(offset);
+	if (new == NULL) {
+		return -1;
+	}
+	if (where == 1) {
 		new->next = lt->next;
 		if (new->next != NULL) {
 			new->next->prev = new;
 		}
 		lt->next = new;
 		new->prev = lt;
-	} else if (where == -1) { // before
+	} else if (where == -1) {
 		new->prev = lt->prev;
 		if (new->prev != NULL) {
 			new->prev->next = new;
 		}
 		lt->prev = new;
 		new->next = lt;
-	} else { // err
-		goto err;
-	}
-
-	return 1;
-err:
-	return -1;	
-}
-
-/*
- 获取链表中第一个节点并返回
- 如果成功返回链表中第一个节点
- 如果失败返回 NULL
-*/
-struct line_t *line_t_get_head(struct line_t *lt) {
-	struct line_t *head = NULL;
-	if (lt == NULL) {
-		return NULL;
-	}
-	head = lt;
-	while (head->prev != NULL) {
-		head = head->prev;
-	}
-	return head;
-}
-
-/*
- 获取链表中最后一个节点并返回
- 如果成功返回链表中最后一个节点
- 如果失败返回 NULL
-*/
-struct line_t *line_t_get_tail(struct line_t *lt) {
-	struct line_t *tail = NULL;
-	if (lt == NULL) {
-		return NULL;
-	}
-	tail = lt;
-	while (tail->next != NULL) {
-		tail = tail->next;
-	}
-	return tail;
-}
-
-/*
- 遍历链表以返回链表的长度
- 如果成功返回链表的长度
- 如果失败返回0
-*/
-uint64_t line_t_get_len(struct line_t *lt) {
-	struct line_t *temp = NULL;
-	uint64_t len = 1;
-	if (lt == NULL) {
-		return 0;
-	}
-	temp = lt;
-	while (1) {
-		if (temp->next != NULL) {
-			temp = temp->next;
-			len++;
-		} else {
-			break;
-		}
-	}
-	temp = lt;
-	while (1) {
-		if (temp->prev != NULL) {
-			temp = temp->prev;
-			len++;
-		} else {
-			break;
-		}
-	}
-	return len;
-}
-
-/*
- 获取链表中第num个节节点并返回
- 如果成功返回链表中第num个节点
- 如果失败返回 NULL
-*/
-struct line_t *line_t_get(struct line_t *lt,uint64_t num) {
-	struct line_t *head = NULL;
-	head = line_t_get_head(lt);
-	if (head == NULL) {
-		goto err;
-	}
-	struct line_t *ret = NULL;
-
-	ret = head;
-	uint64_t i;
-	for (i=1;i<num;i++) {
-		if (ret->next == NULL) {
-			goto err;
-		}
-		ret = ret->next;
-	}
-	return ret;
-
-err:
-	return NULL;
-}
-
-/*
- 获取 lt 节点在链表中的位置
- 如果成功返回非0正数位置
- 如果失败返回0
-*/
-uint64_t line_t_pos(struct line_t *lt) {
-	if (lt == NULL) {
-		return -1;
-	}
-	struct line_t *cur;
-	uint64_t pos = 1;
-	cur = lt;
-	while (cur->prev != NULL) {
-		cur = cur->prev;
-		pos++;
-	}
-	return pos;
-}
-
-/*
- 链表测试
-*/
-int line_t_test(void) {
-	struct line_t *node = NULL;
-
-	// 节点初始化
-	node = line_t_new();
-	if (node == NULL) {
-		fprintf(stderr,"FAIL line_t_new()\n");
-		return -1;
-	}
-
-	// 头部节点追加
-	uint64_t i;
-	for (i=1;i<=99;i++) {
-		if (line_t_insert_new(node,1) == -1) {
-			fprintf(stderr,"FAIL line_t_insert_new()\n");
-			return -1;
-		}
-	}
-
-	// 链表长度
-	if (line_t_get_len(node) != 100) {
-		fprintf(stderr,"FAIL line_t_get_len()\n");
-		return -1;
-	}
-
-	// 末尾节点追加
-	for (i=1;i<=155;i++) {
-		if (line_t_insert_new(node,1) == -1) {
-			fprintf(stderr,"FAIL line_t_insert_new()\n");
-			return -1;
-		}
-	}
-
-	// 链表长度
-	if (line_t_get_len(node) != 255) {
-		fprintf(stderr,"FAIL line_t_get_len()\n");
-		return -1;
-	}
-
-	// 边界检查
-
-	// 获取第一个节点
-	struct line_t *head_node = NULL;
-	head_node = line_t_get_head(node);
-	if (head_node == NULL) {
-		fprintf(stderr,"FAIL line_t_get_head()\n");
-		return -1;
-	}
-	if (head_node->prev != NULL) {
-		fprintf(stderr,"FAIL line_t_get_head()\n");
-		return -1;
-	}
-
-	// 获取最后一个节点
-	struct line_t *tail_node = NULL;
-	tail_node = line_t_get_tail(node);
-	if (tail_node == NULL) {
-		fprintf(stderr,"FAIL line_t_get_tail()\n");
-		return -1;
-	}
-	if (tail_node->next != NULL) {
-		fprintf(stderr,"FAIL line_t_get_tail()\n");
-		return -1;
-	}
-
-	// 赋值操作检查
-	struct line_t *cur = NULL;
-
-	// 顺序赋值
-	cur = head_node;
-	for (i=1;i<=255;++i) {
-		cur->len = i;
-		cur = (cur->next);
-	}
-
-	// 逆序赋值
-	cur = tail_node;
-	for (i=255;i>=1;--i) {
-		cur->len = i;
-		cur = cur->prev;
-	}
-
-	// 随机 值检查
-	FILE *rand;
-	rand = fopen("/dev/random","r");
-	if (rand == NULL) {
-		fprintf(stderr,"Fail open /dev/random ");
-		perror("");
-		return -1;
-	}
-	uint8_t randint;
-
-	int testcounter = 0;
-
-	while (1) {
-		if (testcounter == 100) {
-			break;
-		}
-		randint = (uint8_t)fgetc(rand);
-		if (randint == 0) {
-			continue;
-		}
-
-		cur = line_t_get(node,randint);
-		if (cur == NULL) {
-			fprintf(stderr,"%d\n",randint);
-			fprintf(stderr,"FAIL line_t_get()\n");
-			fclose(rand);
-			return -1;
-		}
-		if (cur->len != randint) {
-			fprintf(stderr,"%d != %d\n",cur->len,randint);
-			fprintf(stderr,"FAIL line_t_get()\n");
-			fclose(rand);
-			return -1;
-		}
-		if (line_t_pos(cur) != randint) {
-			fprintf(stderr,"FAIL line_t_pos()\n");
-			return -1;
-		}
-		testcounter++;
-	}
-	fclose(rand);
-
-	// 释放测试
-	cur = line_t_get_head(node);
-	for (i=1;i<=254;i++) {
-		if (line_t_free(cur->next) == -1) {
-			fprintf(stderr,"FAIL line_t_free()\n");
-			return -1;
-		}
-	}
-	if (line_t_free(cur) == -1) {
-		fprintf(stderr,"FAIL line_t_free()\n");
-	}
-
-	return 1;
-}
-
-struct file_t {
-	FILE *fp;             // 文件流
-	uint64_t lines;       // 链表长度，文件一共 lines 行
-	struct line_t *start; // 链表第一个节点，文件的第1行
-	struct line_t *end;   // 链表最后一个节点，文件的最后1行
-	struct line_t *cur;   // 当前操作的行
-	uint64_t cur_pos;     // 当前操作的行的行号
-};
-
-/*
- 创建并初始化 file_t 结构
- 如果成功则返回 file_t 结构，使用 malloc 申请分配内存空间
- 如果失败则返回 NULL
-*/
-struct file_t *file_t_new(FILE *fp) {
-	if (fp == NULL) {
-		return NULL;
-	}
-	struct file_t *new;
-	new = (struct file_t *)malloc(sizeof(*new));
-	if (new == NULL) {
-		return NULL;
-	}
-
-	new->fp = fp;
-
-	struct line_t *line1 = NULL;
-	line1 = line_t_new();
-	if (line1 == NULL) {
-		goto err;
-	}
-
-	new->lines = 0;
-	new->start = line1;
-	new->end = line1;
-	new->cur = line1;
-	new->cur_pos = 0;
-
-	return new;
-
-err:
-	if (line1 != NULL) {
-		line_t_free(line1);
-	}
-	if (new != NULL) {
-		free(new);
-	}
-	return NULL;
-}
-
-/*
- 加载文件内容到 file_t 结构
- 如果成功返回1
- 如果失败返回-1
-*/
-int file_t_load_file(struct file_t *ft) {
-	if (ft == NULL) {
-		return -1;
-	}
-
-	if (ft->fp == NULL) {
-		return -1;
-	}
-
-	struct line_t *cur;
-	char *line = NULL;
-	uint64_t len = 0;
-
-	cur = ft->start;
-
-	while ((len = getline(&line,&len,ft->fp)) != -1) {
-		cur->line = strdup(line);
-		cur->len = len;
-		if (line_t_insert_new(cur,1) == -1) {
-			return -1;
-		}
-		cur = cur->next;
-		ft->lines++;
-	}
-	free(line);
-
-	ft->start = line_t_get_head(cur);
-	if (ft->start == NULL) {
-		return -1;
-	}
-	ft->end = line_t_get(cur,ft->lines);
-	if (ft->end == NULL) {
-		return -1;
-	}
-	ft->cur = ft->start;
-	ft->cur_pos = 1;
-	return 1;
-}
-
-/*
- 将 file_t 结构中的内存释放
- 如果成功返回1
- 如果失败返回-1
-*/
-int file_t_free(struct file_t *ft) {
-	if (ft == NULL) {
-		return -1;
-	}
-
-	if (ft->fp != NULL) {
-		fclose(ft->fp);
-	}
-
-	struct line_t *cur;
-	cur = line_t_get_head(ft->start);
-	while (cur->next != NULL) {
-		if (line_t_free(cur->next) == -1) {
-			return -1;
-		}
-	}
-	if (line_t_free(cur) == -1) {
-		return -1;
-	}
-
-	free(ft);
-
-	return 1;
-}
-
-/*
- 将内存中的文件内容写入到文件中
- 如果 new 为NULL则写入在原来文件中
- 如果 new 为非NULL，则写入在new中
- 如果成功则返回1
- 如果失败则返回-1
-*/
-int file_t_dump(struct file_t *ft,FILE *new) {
-	if (ft == NULL) {
-		return -1;
-	}
-	FILE *fw = NULL;
-	if (new == NULL) {
-		fw = ft->fp;
 	} else {
-		fw = new;
-	}
-
-	if (fw == NULL) {
 		return -1;
 	}
+	return 1;
 
-	if (fseek(fw,0,SEEK_SET) == -1) {
+}
+
+int line_t_free(struct line_t *lt) {
+	if (lt == NULL) {
 		return -1;
 	}
-
-	struct line_t *cur = NULL;
-	uint64_t i;
-	cur = ft->start;
-	if (ftruncate(fileno(fw),0) == -1) {
-		return -1;
+	if (lt->prev != NULL) {
+		lt->prev->next = lt->next;
 	}
-	for (i=1;i<=(ft->lines);i++) {
-		if (cur == NULL) {
-			return -1;
-		}
-		if (cur->line == NULL) {
-			return -1;
-		}
-		if (cur->len == 0) {
-			return -1;
-		}
-		if (fwrite(cur->line,cur->len,1,fw) != 1) {
-			return -1;
-		}
-		if (cur->next == NULL) {
-			break;
-		}
-		cur = cur->next;
+	if (lt->next != NULL) {
+		lt->next->prev = lt->prev;
 	}
-
-	fflush(fw);
+	free(lt);
 	return 1;
 }
 
-
-// 有BUG
-/*
- 往当前行的前/后面插入内容
- 内容从in中读取
- 如果where == -1 在前一行插入
- 如果where == 1 在行后插入
- 如果成功返回1
- 如果失败返回-1
-*/
-int add_lines(struct file_t *ft,FILE *in,int where) {
-	if (ft == NULL || in == NULL) {
+int line_t_freeall(struct line_t *lt) {
+	if (lt == NULL) {
 		return -1;
 	}
-	if (!(where == -1 || where == 1)) {
+	while (lt->next != NULL) {
+		if (line_t_free(lt) == -1) {
+			return -1;
+		}
+	}
+	while (lt->prev != NULL) {
+		if (line_t_free(lt) == -1) {
+			return -1;
+		}
+	}
+	if (line_t_free(lt) == -1) {
 		return -1;
-	}
-	char end[] = { '.', '\n', '\0' };
-	char *line = NULL;
-	size_t linelen = 0;
-	while (getline(&line,&linelen,in) != -1) {
-		if (strncmp(line,end,2) == 0) {
-			break;
-		}
-		if (ft->lines != 0) {
-			if (line_t_insert_new(ft->cur,where) == -1) {
-				goto err;
-			}
-			if (where == 1) {
-				ft->cur = ft->cur->next;
-			} else if (where == -1) {
-				ft->cur = ft->cur->prev;
-			}
-		}
-
-		ft->cur->line = strdup(line);
-		ft->cur->len = linelen;
-		if (ft->end->next != NULL) {
-			ft->end = line_t_get_tail(ft->end);
-		}
-		if (ft->start->prev != NULL) {
-			ft->start = line_t_get_head(ft->start);
-		}
-		ft->lines++;
-	}
-	ft->cur_pos = line_t_pos(ft->cur);
-	if (line != NULL) {
-		free(line);
-	}
-	return 1;
-err:
-	if (line != NULL) {
-		free(line);
 	}
 	return -1;
 }
 
-/*
- 打印指定的行
- 如果 line_num == 0 则打印ft->cur->line
- 成功返回1
- 失败返回-1
-*/
-int display_line(struct file_t *ft,uint64_t line_num) {
-	struct line_t *cur = NULL;
-	if (line_num == 0) {
-		printf("%s",ft->cur->line);
-	} else {
-		cur = line_t_get(ft->start,line_num);
-		if (cur == NULL) {
-			return -1;
-		}
-		printf("%s",cur->line);
+unsigned long line_t_length(struct line_t *lt) {
+	struct line_t *temp;
+	if (lt == NULL) {
+		return 0;
 	}
-	return 1;
+	temp = lt;
+	unsigned long len = 1;
+	while (temp->prev != NULL) {
+		temp = temp->prev;
+		++len;
+	}
+	temp = lt;
+	while (temp->next != NULL) {
+		temp = temp->next;
+		++len;
+	}
+	return len;
 }
 
-/*
- 移动 ft->cur 到指定行
- 如果成功返回1
- 如果失败返回-1
-*/
-
-int move_linep(struct file_t *ft,uint64_t line_num) {
-	struct line_t *cur = NULL;
-	cur = line_t_get(ft->start,line_num);
-	if (cur == NULL) {
-		return -1;
+unsigned long line_t_position(struct line_t *lt) {
+	if (lt == NULL) {
+		return 0;
 	}
-	if (cur == ft->cur) {
-		return 1;
-	} else {
-		ft->cur = cur;
-		ft->cur_pos = line_num;
-		return 1;
+	unsigned long pos = 1;
+	struct line_t *temp = NULL;
+	temp = lt;
+	while (temp->prev != NULL) {
+		temp=temp->prev;
+		++pos;
 	}
+	return pos;
 }
 
-/*
- file_t 结构测试
-*/
-int file_t_test(void) {
-	FILE *testfp = NULL;
-	struct file_t *testfile = NULL;
-
-	testfp = fopen("./testread","r+");
-	if (testfp == NULL) {
-		fprintf(stderr,"can't open file testread\n");
-		perror("");
-		return -1;
+struct line_t *line_t_get(struct line_t *lt,unsigned long position) {
+	if (lt == NULL || position == 0) {
+		return NULL;
 	}
-
-	// 初始化测试
-	testfile = file_t_new(testfp);
-	if (testfile == NULL) {
-		fprintf(stderr,"FAIL file_t_new()\n");
-		return -1;
+	unsigned long p;
+	struct line_t *ret = NULL;
+	ret = lt;
+	while (ret->prev != NULL) {
+		ret = ret->prev;
 	}
-
-	// 文件加载测试
-	if (file_t_load_file(testfile) == -1) {
-		fprintf(stderr,"FAIL file_t_load_file()\n");
-		return -1;
+	if (position == 1) {
+		return ret;
 	}
-
-	// 加载进内存的文件行数是否正确
-	uint64_t i;
-	struct line_t *cur;
-	for (i=1;i<=(testfile->lines);i++) {
-		cur = line_t_get(testfile->start,i);
-		if (cur == NULL) {
-			fprintf(stderr,"FAIL file_t_load_file()\n");
-			return -1;
+	for (p = 1;p<=position;p++) {
+		if (ret->next == NULL) {
+			return NULL;
 		}
+		ret = ret->next;
 	}
-
-	// 测试写入
-	FILE *new = NULL;
-	new = fopen("./testwrite","r+");
-	if (new == NULL) {
-		fprintf(stderr,"can't open file testwrite\n");
-		return -1;
-	}
-	if (file_t_dump(testfile,new) == -1) {
-		fprintf(stderr,"FAIL file_t_dump()\n");
-		return -1;
-	}
-
-	// 测试写入是否完整
-	int cr;
-	int cw;
-	rewind(testfp);
-	rewind(new);
-	while ((cr = fgetc(testfp)) != EOF) {
-		cw = fgetc(new);
-		if (cw == EOF) {
-			fprintf(stderr,"FAIL file_t_dump()\n");
-			return -1;
-		}
-		if (cw != cr) {
-			fprintf(stderr,"FAIL file_t_dump()\n");
-			return -1;
-		}
-	}
-	fclose(new);
-
-	// 释放 file_t
-	if (file_t_free(testfile) == -1) {
-		fprintf(stderr,"FAIL file_t_free()\n");
-		return -1;
-	}
-
-	return 1;
+	return ret;
 }
 
-/*
- 从输入读入命令，解析，并执行
- 如果出现重大故障返回 -1
- 如果出现普通故障返回 -2
- 如果正常退出返回0
-*/
-
-int commands(FILE *in,struct file_t *ft) {
-	if (in == NULL) {
+int main(void) {
+	if (test_line_t() == -1) {
 		return -1;
 	}
-
-	char *cmd = NULL;
-	size_t cmdlen = 0;
-	size_t i;
-	while (getline(&cmd,&cmdlen,in) != -1) {
-		if (*cmd == 'q') {
-			return 0;
-		} else if (*cmd == 'w') {
-			if (file_t_dump(ft,NULL) == -1) {
-				fprintf(stderr,"Can't write to file ");
-				perror("");
-			}
-		} else if (*cmd == 'p') {
-			if (display_line(ft,0) == -1) {
-				fprintf(stderr,"Can't print line\n");
-			}
-		} else if (*cmd == '-') {
-			if (move_linep(ft,ft->cur_pos-1) == -1) {
-				fprintf(stderr,"Can't move line pointer\n");
-			}
-		} else if (*cmd == '=') {
-			if (move_linep(ft,ft->cur_pos+1) == -1) {
-				fprintf(stderr,"Can't move line pointer\n");
-			}
-		} else if (*cmd == 'a') {
-			if (add_lines(ft,in,1) == -1) {
-				fprintf(stderr,"Can't add line\n");
-			}
-		} else if (*cmd == 'i') {
-			if (add_lines(ft,in,-1) == -1) {
-				fprintf(stderr,"Can't add line\n");
-			}
-		} else { // 核心代码 !!!
-			putchar('?');
-			putchar('\n');
-		}
-	}
-}
-
-int main(int argc, char *argv[1]) {
-#ifdef TEST
-	if (line_t_test() == -1) {
-		fprintf(stderr,"line_t Test Failed!\n");
-		exit(EXIT_FAILURE);
-	}
-
-	if (file_t_test() == -1) {
-		fprintf(stderr,"file_t Test Failed!\n");
-		exit(EXIT_FAILURE);
-	}
-#endif
-
-	char *filename = NULL;
-	FILE *fp = NULL;
-	struct file_t *ft = NULL;
-	int exit_status = 0;
-
-	filename = argv[1];
-
-	fp = fopen(filename,"r+");
-	if (fp == NULL) {
-		fprintf(stderr,"Can't open file %s ",filename);
-		perror("");
-		exit(EXIT_FAILURE);
-	}
-	ft = file_t_new(fp);
-	if (ft == NULL) {
-		fprintf(stderr,"Can't init file %s ",filename);
-		perror("");
-		exit(EXIT_FAILURE);
-	}
-	if (file_t_load_file(ft) == -1) {
-		fprintf(stderr,"Can't load file %s ",filename);
-		perror("");
-		exit(EXIT_FAILURE);
-	}
-
-	exit(commands(stdin,ft));
+	return 0;
 }

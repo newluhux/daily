@@ -16,3 +16,4 @@ x search	<address> <length> <data>	在内存区域中搜索内容
 开发计划:
 
 x 内置 lisp 解释器用于编写脚本
+x 分离为客户端/服务器模式

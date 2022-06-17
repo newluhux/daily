@@ -1,29 +1,19 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <limits.h>
+#include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
-#include <ctype.h>
+#include <unistd.h>
 
-#define MAX_MEM_REGION 8129
-#define VVAR_PATHNAME "[vvar]"
-
-void sysfatal(char *msg);
-
-void sysfatal(char *msg) {
-	fprintf(stderr,"%s ",msg);
-	perror("");
-	exit(EXIT_FAILURE);
-}
+#define MAX_MEM_REGION 8129     // 读入的内存区域个数上限
+#define VVAR_PATHNAME "[vvar]"  // vvar 区域，不可被读
 
 /*
-/proc/<pid>/maps
-
-describe: man 5 proc
+参考文档: man 5 proc
 */
 struct maps_line_t {
 	unsigned long addr_start;
@@ -37,15 +27,15 @@ struct maps_line_t {
 };
 
 struct mem_region_t {
-	void *mem; // 存放读取的内存内容
+	void *mem; // 存放读取的内存区域的内容
 	struct maps_line_t info;
 };
 
 struct proc_t {
 	pid_t pid;
 	int memfd;
-	int region_count; // 多少个count
-	struct mem_region_t *region_list[MAX_MEM_REGION]; // 除了[vvar]区域之外的所有区域
+	int region_count; // 一共读入的内存区域个数
+	struct mem_region_t *region_list[MAX_MEM_REGION];
 };
 
 struct mem_region_t *mem_region_t_new(void);
@@ -58,7 +48,7 @@ struct proc_t *proc_t_new(void);
 int proc_t_clean_regions(struct proc_t *proc);
 int proc_t_reload_regions(pid_t pid,struct proc_t *proc);
 void proc_t_print(struct proc_t *proc);
-int proc_t_dumpall(char *outfnprefix,struct proc_t *proc);
+int proc_t_dumpall(struct proc_t *proc);
 
 // 删除字符串开头的空白
 char *strstripspace(char *s) {
@@ -76,18 +66,25 @@ char *strstripspace(char *s) {
 struct mem_region_t *mem_region_t_new(void) {
 	struct mem_region_t *new = NULL;
 	new = (struct mem_region_t *)malloc(sizeof(struct mem_region_t));
-	if (new == NULL)
-		sysfatal("can't malloc memory ");
+	if (new == NULL) {
+		fprintf(stderr,"%s: can't alloc memory\n",__func__);
+		exit(EXIT_FAILURE);
+	}
 	memset(new,0,sizeof(*new));
 	new->mem = NULL;
 	return new;
 }
 
 int mem_region_t_init(char *line,struct mem_region_t *mr,struct proc_t *proc) {
-	if (line == NULL || mr == NULL || proc == NULL)
-		sysfatal("don't access null ptr ");
-	if ( proc->memfd < 0)
-		sysfatal("please open mem ");
+	if (line == NULL || mr == NULL || proc == NULL) {
+		fprintf(stderr,"%s: try to access null ptr\n",__func__);
+		exit(EXIT_FAILURE);
+	}
+		
+	if ( proc->memfd < 0) {
+		fprintf(stderr,"%s: invalid memfd\n",__func__);
+		exit(EXIT_FAILURE);
+	}
 
 	mr->info.addr_start = strtoull(strtok(line,"-"), NULL, 16);
 	mr->info.addr_end = strtoull(strtok(NULL," "), NULL, 16);
@@ -106,23 +103,34 @@ int mem_region_t_init(char *line,struct mem_region_t *mr,struct proc_t *proc) {
 		mr->info.pathname[0] = '\0';
 	}
 
-	if (lseek(proc->memfd,mr->info.addr_start,SEEK_SET) == -1)
-		sysfatal("can't lseek mem file! ");
-
-	if (strncmp(mr->info.pathname,VVAR_PATHNAME,strlen(VVAR_PATHNAME)) == 0) // 跳过不可访问的 vvar 区域
+	if (lseek(proc->memfd,mr->info.addr_start,SEEK_SET) == -1) {
+		fprintf(stderr,"%s: can't lseek memfd to 0x%lx\n",__func__,mr->info.addr_start);
+		exit(EXIT_FAILURE);		
+	}
+	if (strncmp(mr->info.pathname,VVAR_PATHNAME,
+		strlen(VVAR_PATHNAME)) == 0) // 跳过不可访问的 vvar 区域
 		return 1;
 
 	unsigned long addr_cur = mr->info.addr_start;
 	unsigned char *memload = (unsigned char *)malloc(mr->info.addr_end - mr->info.addr_start);
-	if (memload == NULL)
-		sysfatal("can't malloc memory! ");
+	if (memload == NULL) {
+		fprintf(stderr,"%s: can't alloc memory\n",__func__);
+		exit(EXIT_FAILURE);			
+	}
+
 	mr->mem = memload;
 	long pagesize = sysconf(_SC_PAGESIZE);
-	if (((mr->info.addr_end - mr->info.addr_start) % pagesize) != 0)
-		sysfatal("wrong pagesize for reading ");
+	if (((mr->info.addr_end - mr->info.addr_start) % pagesize) != 0) {
+		fprintf(stderr,"%s: wrony pagesize\n",__func__);
+		exit(EXIT_FAILURE);			
+	}
+
 	for (;addr_cur<mr->info.addr_end;addr_cur += pagesize) {
-		if (read(proc->memfd,memload,pagesize) != pagesize)
-			sysfatal("can't read memory ");
+		if (read(proc->memfd,memload,pagesize) != pagesize) {
+			fprintf(stderr,"%s: read error",__func__);
+			perror("");
+			exit(EXIT_FAILURE);
+		}
 		memload += pagesize;
 	}
 	return 1;
@@ -136,8 +144,10 @@ void mem_region_t_free(struct mem_region_t *mr) {
 }
 
 void mem_region_t_print(struct mem_region_t *mr) {
-	if (mr == NULL)
-		sysfatal("don't access null ptr ");
+	if (mr == NULL) {
+		fprintf(stderr,"%s: can't alloc memory\n",__func__);
+		exit(EXIT_FAILURE);
+	}
 	printf("memory buf : %lx\n",mr->mem);
 	printf("memory range : %lx-%lx\n",mr->info.addr_start,mr->info.addr_end);
 	printf("permission : %s \n",mr->info.perms);
@@ -151,11 +161,18 @@ void mem_region_t_print(struct mem_region_t *mr) {
 
 int mem_region_t_dump(int outfd,struct mem_region_t *mr) {
 	if (outfd < 1 || mr == NULL) {
-		fprintf(stderr,"can't dump to fd\n");
-		return -1;
+		fprintf(stderr,"%s: try access null ptr\n",__func__);
+		exit(EXIT_FAILURE);
 	}
+		
 	if (mr->mem == NULL) {
-		fprintf(stderr,"can't dump to fd\n");
+		if (strcmp(mr->info.pathname,"[vvar]") == 0) {
+			fprintf(stderr,"skip vvar region\n");
+		} else {
+			fprintf(stderr,"can't dump %lx-%lx\n",
+							mr->info.addr_start,
+							mr->info.addr_end);
+		}
 		return -1;
 	}
 	long pagesize = sysconf(_SC_PAGESIZE);
@@ -163,7 +180,7 @@ int mem_region_t_dump(int outfd,struct mem_region_t *mr) {
 	unsigned long wn;
 	for (wn=mr->info.addr_start;wn<mr->info.addr_end;wn+=pagesize) {
 		if (write(outfd,p,pagesize) != pagesize) {
-			fprintf(stderr,"can't write ");
+			fprintf(stderr,"%s:can't write ",__func__);
 			perror("");
 			return -1;
 		}
@@ -173,8 +190,11 @@ int mem_region_t_dump(int outfd,struct mem_region_t *mr) {
 }
 
 int proc_t_clean_regions(struct proc_t *proc) {
-	if (proc == NULL)
-		sysfatal("don't access nullptr ");
+	if (proc == NULL) {
+		fprintf(stderr,"%s: try access null ptr\n",__func__);
+		exit(EXIT_FAILURE);
+	}
+
 	int i;
 	for (i=0;i<MAX_MEM_REGION;i++) {
 		if (proc->region_list[i] != NULL) {
@@ -189,8 +209,11 @@ int proc_t_clean_regions(struct proc_t *proc) {
 struct proc_t *proc_t_new(void) {
 	struct proc_t *new = NULL;
 	new = (struct proc_t *)malloc(sizeof(struct proc_t));
-	if (new == NULL)
-		sysfatal("can't malloc memory!");
+	if (new == NULL) {
+		fprintf(stderr,"%s: can't alloc memory\n",__func__);
+		exit(EXIT_FAILURE);
+	}
+		
 	memset(new,0,sizeof(struct proc_t));
 	proc_t_clean_regions(new);
 	new->memfd = -1;
@@ -199,8 +222,11 @@ struct proc_t *proc_t_new(void) {
 }
 
 int proc_t_reload_regions(pid_t pid,struct proc_t *proc) {
-	if (proc == NULL)
-		sysfatal("don't access null ptr ");
+	if (proc == NULL) {
+		fprintf(stderr,"%s: try access null ptr\n",__func__);
+		exit(EXIT_FAILURE);
+	}
+		
 	proc->pid = pid;
 
 	proc_t_clean_regions(proc);
@@ -209,22 +235,32 @@ int proc_t_reload_regions(pid_t pid,struct proc_t *proc) {
 	int mapsfd = -1;
 	char fname[PATH_MAX];
 
-	if (ptrace(PTRACE_ATTACH,proc->pid,NULL,NULL) < 0)
-		sysfatal("can't ptrace attach process");
+	if (ptrace(PTRACE_ATTACH,proc->pid,NULL,NULL) < 0) {
+		fprintf(stderr,"%s: ptrace can't attch process %ld ",__func__,proc->pid);
+		perror("");
+		exit(EXIT_FAILURE);
+	}
 
 	snprintf(fname,PATH_MAX,"/proc/%ld/maps",proc->pid);
 	mapsfd = open(fname,O_RDONLY);
-	if (mapsfd == -1)
-		sysfatal("can't open maps");
+	if (mapsfd == -1) {
+		fprintf(stderr,"%s: can't open maps file %s ",__func__,fname);
+		exit(EXIT_FAILURE);
+	}
+		
 	snprintf(fname,PATH_MAX,"/proc/%ld/mem",proc->pid);
 	memfd = open(fname,O_RDONLY);
-	if (memfd == -1)
-		sysfatal("can't open mem");
+	if (memfd == -1) {
+		fprintf(stderr,"%s: can't open mem file %s ",__func__,fname);
+		exit(EXIT_FAILURE);
+	}
 	proc->memfd = memfd;
 
 	FILE *maps_stream = fdopen(mapsfd,"r");
-	if (maps_stream == NULL)
-		sysfatal("can't open maps stream");
+	if (maps_stream == NULL) {
+		fprintf(stderr,"%s: can't open maps stream\n",__func__);
+		exit(EXIT_FAILURE);
+	}
 
 	char line[PATH_MAX];
 	while (fgets(line,PATH_MAX,maps_stream) != NULL) {
@@ -241,8 +277,10 @@ int proc_t_reload_regions(pid_t pid,struct proc_t *proc) {
 }
 
 void proc_t_print(struct proc_t *proc) {
-	if (proc == NULL)
-		sysfatal("don't access null ptr");
+	if (proc == NULL) {
+		fprintf(stderr,"%s: try access null ptr\n",__func__);
+		exit(EXIT_FAILURE);
+	}
 
 	printf("pid: %ld\n",proc->pid);
 	printf("memfd: %d\n",proc->memfd);
@@ -255,15 +293,17 @@ void proc_t_print(struct proc_t *proc) {
 	}
 }
 
-int proc_t_dumpall(char *outfnprefix,struct proc_t *proc) {
-	if (outfnprefix == NULL || proc == NULL)
-		sysfatal("don't access null ptr");
+int proc_t_dumpall(struct proc_t *proc) {
+	if (proc == NULL) {
+		fprintf(stderr,"%s: try access null ptr\n",__func__);
+		exit(EXIT_FAILURE);
+	}
 	char fname[PATH_MAX];
 	int i;
 	int outfd;
 	for(i=0;i<(proc->region_count);i++) {
-		snprintf(fname,PATH_MAX,"%s_%ld_%lx-%lx.mem",
-			outfnprefix,proc->pid,
+		snprintf(fname,PATH_MAX,"%ld_%lx-%lx.mem",
+			proc->pid,
 			proc->region_list[i]->info.addr_start,
 			proc->region_list[i]->info.addr_end);
 		outfd = open(fname,O_WRONLY|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
@@ -272,23 +312,42 @@ int proc_t_dumpall(char *outfnprefix,struct proc_t *proc) {
 			perror("");
 			return -1;
 		}
-		if (mem_region_t_dump(outfd,proc->region_list[i]) == -1) {
-			close(outfd);
-			if (strncmp(proc->region_list[i]->info.pathname,
-						VVAR_PATHNAME,strlen(VVAR_PATHNAME)) != 0) {
-				return -1;
-			}
-		}
+		mem_region_t_dump(outfd,proc->region_list[i]);
 		close(outfd);
 	}
 	return 1;
 }
 
-int main(int argc, char *argv[]) {
+void commands(FILE *in,pid_t pid) {
+	// 初始化
 	struct proc_t *proc = proc_t_new();
 	proc_t_clean_regions(proc);
-	proc_t_reload_regions(atoi(argv[1]),proc);
-	proc_t_print(proc);
-	proc_t_dumpall("dump",proc);
+	proc_t_reload_regions(pid,proc);
+
+	char line[PATH_MAX];
+
+	while (fgets(line,PATH_MAX,in) != NULL) {
+		if (strstr(line,"exit") != NULL) {
+			exit(EXIT_FAILURE);
+		} else if (strstr(line,"reload") != NULL) {
+			proc_t_reload_regions(proc->pid,proc);
+		} else if (strstr(line,"info") != NULL) {
+			proc_t_print(proc);
+		} else if (strstr(line,"dump") != NULL) {
+			proc_t_dumpall(proc);
+		} else if (strstr(line,"clean") != NULL) {
+			proc_t_clean_regions(proc);
+		}
+	}
+}
+
+int main(int argc, char *argv[]) {
+	pid_t pid;
+	if (argc < 2) {
+		fprintf(stderr,"usage: %s pid\n",argv[0]);
+		exit(EXIT_FAILURE);
+	}
+	pid = atol(argv[1]);
+	commands(stdin,pid);
 	exit(EXIT_SUCCESS);
 }

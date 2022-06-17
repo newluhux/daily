@@ -52,12 +52,15 @@ struct mem_region_t *mem_region_t_new(void);
 int mem_region_t_init(char *line,struct mem_region_t *mr,struct proc_t *proc);
 void mem_region_t_free(struct mem_region_t *mr);
 void mem_region_t_print(struct mem_region_t *mr);
+int mem_region_t_dump(int outfd,struct mem_region_t *mr);
 
-struct proc_t *proc_t_new(pid_t pid);
+struct proc_t *proc_t_new(void);
 int proc_t_clean_regions(struct proc_t *proc);
-int proc_t_reload_regions(struct proc_t *proc);
+int proc_t_reload_regions(pid_t pid,struct proc_t *proc);
 void proc_t_print(struct proc_t *proc);
+int proc_t_dumpall(char *outfnprefix,struct proc_t *proc);
 
+// 删除字符串开头的空白
 char *strstripspace(char *s) {
 	int i;
 	int n = 0;
@@ -146,6 +149,29 @@ void mem_region_t_print(struct mem_region_t *mr) {
 	return;
 }
 
+int mem_region_t_dump(int outfd,struct mem_region_t *mr) {
+	if (outfd < 1 || mr == NULL) {
+		fprintf(stderr,"can't dump to fd\n");
+		return -1;
+	}
+	if (mr->mem == NULL) {
+		fprintf(stderr,"can't dump to fd\n");
+		return -1;
+	}
+	long pagesize = sysconf(_SC_PAGESIZE);
+	unsigned char *p = (unsigned char *)mr->mem;
+	unsigned long wn;
+	for (wn=mr->info.addr_start;wn<mr->info.addr_end;wn+=pagesize) {
+		if (write(outfd,p,pagesize) != pagesize) {
+			fprintf(stderr,"can't write ");
+			perror("");
+			return -1;
+		}
+		p += pagesize;
+	}
+	return 1;
+}
+
 int proc_t_clean_regions(struct proc_t *proc) {
 	if (proc == NULL)
 		sysfatal("don't access nullptr ");
@@ -160,7 +186,7 @@ int proc_t_clean_regions(struct proc_t *proc) {
 	return 1;
 }
 
-struct proc_t *proc_t_new(pid_t pid) {
+struct proc_t *proc_t_new(void) {
 	struct proc_t *new = NULL;
 	new = (struct proc_t *)malloc(sizeof(struct proc_t));
 	if (new == NULL)
@@ -168,13 +194,15 @@ struct proc_t *proc_t_new(pid_t pid) {
 	memset(new,0,sizeof(struct proc_t));
 	proc_t_clean_regions(new);
 	new->memfd = -1;
-	new->pid = pid;
+	new->pid = -1;
 	return new;
 }
 
-int proc_t_reload_regions(struct proc_t *proc) {
+int proc_t_reload_regions(pid_t pid,struct proc_t *proc) {
 	if (proc == NULL)
 		sysfatal("don't access null ptr ");
+	proc->pid = pid;
+
 	proc_t_clean_regions(proc);
 
 	int memfd = -1;
@@ -227,15 +255,40 @@ void proc_t_print(struct proc_t *proc) {
 	}
 }
 
-int main(int argc, char *argv[]) {
-	if (argc < 2) {
-		fprintf(stderr,"Usage: %s pid\n",argv[0]);
-		exit(EXIT_FAILURE);
+int proc_t_dumpall(char *outfnprefix,struct proc_t *proc) {
+	if (outfnprefix == NULL || proc == NULL)
+		sysfatal("don't access null ptr");
+	char fname[PATH_MAX];
+	int i;
+	int outfd;
+	for(i=0;i<(proc->region_count);i++) {
+		snprintf(fname,PATH_MAX,"%s_%ld_%lx-%lx.mem",
+			outfnprefix,proc->pid,
+			proc->region_list[i]->info.addr_start,
+			proc->region_list[i]->info.addr_end);
+		outfd = open(fname,O_WRONLY|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
+		if (outfd == -1) {
+			fprintf(stderr,"can't open file for write %s ",fname);
+			perror("");
+			return -1;
+		}
+		if (mem_region_t_dump(outfd,proc->region_list[i]) == -1) {
+			close(outfd);
+			if (strncmp(proc->region_list[i]->info.pathname,
+						VVAR_PATHNAME,strlen(VVAR_PATHNAME)) != 0) {
+				return -1;
+			}
+		}
+		close(outfd);
 	}
-	pid_t pid = atol(argv[1]);
+	return 1;
+}
 
-	struct proc_t *p = proc_t_new(pid);
-	proc_t_reload_regions(p);
-	proc_t_print(p);
+int main(int argc, char *argv[]) {
+	struct proc_t *proc = proc_t_new();
+	proc_t_clean_regions(proc);
+	proc_t_reload_regions(atoi(argv[1]),proc);
+	proc_t_print(proc);
+	proc_t_dumpall("dump",proc);
 	exit(EXIT_SUCCESS);
 }
